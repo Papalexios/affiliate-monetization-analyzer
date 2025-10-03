@@ -1,0 +1,5 @@
+{
+  "name": "Affiliate Monetization Analyzer",
+  "description": "An advanced tool that crawls a sitemap, analyzes each URL using AI, and provides a detailed affiliate monetization potential score and strategic recommendations for each page.",
+  "requestFramePermissions": []
+}
