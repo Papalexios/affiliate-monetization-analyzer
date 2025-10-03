@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import type { AnalysisResult, AnalysisResultData } from '../types';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
@@ -36,6 +35,21 @@ const DetailSection: React.FC<{ title: string; children: React.ReactNode }> = ({
 const SuccessContent: React.FC<{ data: AnalysisResultData }> = ({ data }) => {
   const [isOpen, setIsOpen] = useState(false);
 
+  // Helper to robustly render action items. The AI can sometimes return an array of objects
+  // (e.g., [{action: '...'}]) instead of an array of strings, which would crash React.
+  // This function handles both formats gracefully to make the UI crash-proof.
+  const renderActionItem = (item: any, index: number) => {
+    if (typeof item === 'string') {
+      return <li key={index}>{item}</li>;
+    }
+    if (typeof item === 'object' && item !== null && typeof item.action === 'string') {
+      return <li key={index}>{item.action}</li>;
+    }
+    // Log and ignore other malformed data to prevent crashes.
+    console.warn("Malformed item in suggested_actions array:", item);
+    return null;
+  };
+
   return (
     <>
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
@@ -61,17 +75,20 @@ const SuccessContent: React.FC<{ data: AnalysisResultData }> = ({ data }) => {
         <div className="border-t border-slate-700 mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <DetailSection title="Suggested Actions">
                 <ul className="list-disc list-inside space-y-1">
-                    {data.suggested_actions.map((action, i) => <li key={i}>{action}</li>)}
+                    {Array.isArray(data.suggested_actions) && data.suggested_actions.length > 0
+                      ? data.suggested_actions.map(renderActionItem).filter(Boolean)
+                      : <li>No specific actions were suggested.</li>
+                    }
                 </ul>
             </DetailSection>
             <DetailSection title="Affiliate Niche">
-                <p className="font-medium text-cyan-400">{data.affiliate_niche}</p>
+                <p className="font-medium text-cyan-400">{data.affiliate_niche || 'N/A'}</p>
             </DetailSection>
             <DetailSection title="Content Gap Analysis">
-                <p>{data.content_gap_analysis}</p>
+                <p>{data.content_gap_analysis || 'N/A'}</p>
             </DetailSection>
             <DetailSection title="Conversion Booster">
-                 <p>{data.conversion_booster}</p>
+                 <p>{data.conversion_booster || 'N/A'}</p>
             </DetailSection>
         </div>
       </div>
