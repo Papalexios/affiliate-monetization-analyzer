@@ -5,7 +5,7 @@ import { Loader } from './components/Loader';
 import { SparklesIcon } from './components/icons/SparklesIcon';
 import { AIProviderSelector } from './components/AIProviderSelector';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import type { AnalysisResult, AIProvider } from './types';
+import type { AnalysisResult, AIWorkerConfig } from './types';
 import { parseSitemap } from './utils/sitemapParser';
 import { analyzeUrl } from './services/aiService';
 
@@ -16,10 +16,11 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
 
-  // AI Provider State
-  const [provider, setProvider] = useState<AIProvider>('gemini');
-  const [apiKey, setApiKey] = useState<string>('');
-  const [customModel, setCustomModel] = useState<string>('');
+  // AI Worker Pool State
+  const [aiWorkers, setAiWorkers] = useState<AIWorkerConfig[]>([
+    { id: crypto.randomUUID(), provider: 'gemini', apiKey: '', model: '' }
+  ]);
+  const [concurrency, setConcurrency] = useState<number>(5);
 
 
   const handleAnalyze = useCallback(async () => {
@@ -27,14 +28,19 @@ const App: React.FC = () => {
       setError('Please paste your sitemap XML content or fetch it from a URL.');
       return;
     }
-    if (!apiKey && provider !== 'gemini') {
-        setError(`Please enter an API key for ${provider}.`);
+
+    const validWorkers = aiWorkers.filter(w => {
+        if (w.provider === 'gemini') return true;
+        if (!w.apiKey.trim()) return false;
+        if ((w.provider === 'openrouter' || w.provider === 'groq') && !w.model.trim()) return false;
+        return true;
+    });
+
+    if (validWorkers.length === 0) {
+        setError('Please configure at least one valid AI Worker. Ensure API keys and models are provided where necessary.');
         return;
     }
-     if ((provider === 'openrouter' || provider === 'groq') && !customModel) {
-      setError(`Please enter a model name for ${provider}.`);
-      return;
-    }
+
 
     setIsLoading(true);
     setError(null);
@@ -54,18 +60,22 @@ const App: React.FC = () => {
       const initialResults: AnalysisResult[] = urls.map(url => ({ url, status: 'pending' }));
       setResults(initialResults);
 
-      const CONCURRENCY_LIMIT = 50;
       const tasks = urls.map((url, index) => ({ url, index }));
+      let nextWorkerIndex = 0;
 
-      const worker = async () => {
+      const taskWorker = async () => {
         while (tasks.length > 0) {
           const task = tasks.shift();
           if (!task) continue;
 
+          // Round-robin selection of a valid AI worker
+          const workerConfig = validWorkers[nextWorkerIndex % validWorkers.length];
+          nextWorkerIndex++;
+
           const { url, index } = task;
 
           try {
-            const analysisData = await analyzeUrl(url, { provider, apiKey, model: customModel });
+            const analysisData = await analyzeUrl(url, workerConfig);
             setResults(prev => {
               const newResults = [...prev];
               newResults[index] = { url, status: 'success', data: analysisData };
@@ -84,12 +94,9 @@ const App: React.FC = () => {
         }
       };
 
-      const workerPromises = Array(CONCURRENCY_LIMIT).fill(null).map(worker);
+      const workerPromises = Array(concurrency).fill(null).map(taskWorker);
       await Promise.all(workerPromises);
-
-      // --- ROBUST FINALIZATION LOGIC ---
-      // This new logic prevents the "blank screen" crash.
-      // It ensures all state updates are processed before hiding the loader.
+      
       setProgress(prev => prev ? { processed: prev.total, total: prev.total } : null);
       
       setTimeout(() => {
@@ -101,7 +108,7 @@ const App: React.FC = () => {
       setError(`Failed to process sitemap. ${errorMessage}`);
       setIsLoading(false);
     }
-  }, [sitemapXml, provider, apiKey, customModel]);
+  }, [sitemapXml, aiWorkers, concurrency]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans">
@@ -143,12 +150,10 @@ const App: React.FC = () => {
             isLoading={isLoading}
           />
           <AIProviderSelector 
-            provider={provider}
-            setProvider={setProvider}
-            apiKey={apiKey}
-            setApiKey={setApiKey}
-            customModel={customModel}
-            setCustomModel={setCustomModel}
+            aiWorkers={aiWorkers}
+            setAiWorkers={setAiWorkers}
+            concurrency={concurrency}
+            setConcurrency={setConcurrency}
             disabled={isLoading}
           />
         </div>

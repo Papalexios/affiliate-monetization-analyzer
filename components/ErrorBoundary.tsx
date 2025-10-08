@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 
-interface Props {
+// Fix: Rename 'Props' to 'ErrorBoundaryProps' to prevent potential type name collisions that may have caused the 'this.props' error.
+interface ErrorBoundaryProps {
   children: ReactNode;
 }
 
@@ -9,10 +10,17 @@ interface State {
   error?: Error;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-  };
+export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
+  // Fix: Reverted to using a standard constructor for state initialization.
+  // The class property syntax can sometimes lead to typing issues in certain toolchains.
+  // Using a constructor explicitly initializes state and ensures `this.props` is correctly handled.
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: undefined,
+    };
+  }
 
   public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };

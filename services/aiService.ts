@@ -1,46 +1,62 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { AnalysisResultData, AIProvider } from '../types';
-
-interface AIConfig {
-    provider: AIProvider;
-    apiKey: string;
-    model?: string;
-}
+import type { AnalysisResultData, AIWorkerConfig } from '../types';
 
 const analysisSchema = {
     type: Type.OBJECT,
     properties: {
         url: { type: Type.STRING },
-        monetization_score: { type: Type.INTEGER, description: "A score from 1-100 estimating the page's potential to generate affiliate revenue" },
-        justification: { type: Type.STRING, description: "A clear, expert-level explanation of why this score was assigned. Reference page intent, audience, product relevance, and affiliate viability." },
-        priority: { type: Type.STRING, description: "High, Medium, or Low, based on urgency and opportunity" },
-        suggested_actions: { 
-            type: Type.ARRAY, 
-            items: { type: Type.STRING },
-            description: "List at least THREE specific, high-impact affiliate optimization steps. Examples: 'Add product comparison table for hiking boots', 'Insert affiliate links for software tools mentioned'."
+        monetization_score: { type: Type.INTEGER, description: "Score from 1-100 for affiliate revenue potential. Be realistic." },
+        summary: { type: Type.STRING, description: "A concise, 1-2 sentence summary explaining the score, focusing on the page's primary strengths and weaknesses for monetization." },
+        priority: { type: Type.STRING, description: "Optimization priority based on potential impact. Must be 'High', 'Medium', or 'Low'." },
+        suggested_actions: {
+            type: Type.ARRAY,
+            description: "An array of exactly THREE distinct, actionable suggestions to improve revenue.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING, description: "A short, clear headline for the action (e.g., 'Add a Product Comparison Table')." },
+                    description: { type: Type.STRING, description: "A 1-2 sentence description of how to implement the action and why it works." },
+                    impact: { type: Type.STRING, description: "The expected impact on revenue. Must be 'High', 'Medium', or 'Low'." },
+                },
+                required: ["title", "description", "impact"],
+            }
         },
-        affiliate_niche: { type: Type.STRING, description: "Identify the most relevant affiliate niche for this page (e.g., SaaS, outdoor gear, finance, health supplements)" },
-        content_gap_analysis: { type: Type.STRING, description: "Briefly identify missing elements that could boost affiliate performance (e.g., lack of buyer intent keywords, missing product links, no visual CTAs)" },
-        conversion_booster: { type: Type.STRING, description: "Suggest one advanced tactic to increase conversions (e.g., interactive quiz, exit-intent popup, urgency timer, trust badges)" }
     },
-    required: ["url", "monetization_score", "justification", "priority", "suggested_actions", "affiliate_niche", "content_gap_analysis", "conversion_booster"]
+    required: ["url", "monetization_score", "summary", "priority", "suggested_actions"]
 };
 
-const systemInstruction = `You are a world-class affiliate marketing strategist and monetization analyst. Your task is to analyze a webpage and determine its potential for affiliate monetization. Act as a hybrid of a CRO expert, SEO strategist, and affiliate revenue optimizer.
-Your analysis must be strategic, data-driven, actionable, and tailored to affiliate marketing best practices.
-You MUST provide a complete, actionable analysis for EVERY URL. Your response MUST be in the structured JSON format defined by the schema.
-EVERY field in the JSON schema is REQUIRED and MUST be filled with a detailed, insightful response. Do NOT use placeholder text like "N/A" or leave fields blank.
-For 'suggested_actions', you MUST provide at least THREE distinct, high-impact suggestions.
-Your professional reputation depends on the quality and completeness of your analysis. Failure to provide a complete JSON object is a failure of your task.`;
+const systemInstruction = `You are an expert affiliate monetization strategist. Your task is to analyze a webpage and provide a structured JSON response outlining its affiliate revenue potential.
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Strictly Adhere to JSON Schema:** Your entire response MUST be a single JSON object that validates against the provided schema. Do not add any text, markdown, or explanations outside of the JSON object.
+2.  **All Fields are Mandatory:** You must provide a valuable, non-placeholder response for every single field in the schema. Do not use "N/A", "Not applicable", or similar.
+3.  **Provide Exactly Three Actions:** The 'suggested_actions' array must contain exactly three unique and impactful action items. Each item must be an object with 'title', 'description', and 'impact' fields.
+4.  **Concise & Actionable:** Keep all text concise and focused on practical, actionable advice. The user is a professional marketer.
+
+**Example \`suggested_actions\` item:**
+{
+  "title": "Embed a 'Best-Value' Product Box",
+  "description": "Add a visually distinct product box highlighting the best-value option with a clear 'Check Price' affiliate link button to increase click-through rate.",
+  "impact": "High"
+}
+
+Your analysis must be sharp, accurate, and directly help the user increase their affiliate income. Your reputation depends on it.`;
 
 const parseJsonResponse = (responseText: string): AnalysisResultData => {
     try {
-        const parsed = JSON.parse(responseText.trim());
-        // Basic validation to ensure we have an object with some keys.
-        if (typeof parsed !== 'object' || parsed === null || Object.keys(parsed).length === 0) {
-            throw new Error("Parsed JSON is not a valid object or is empty.");
+        let cleanText = responseText.trim();
+        // Look for JSON within markdown code blocks (e.g., ```json ... ```) and extract it.
+        const jsonMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch && jsonMatch[1]) {
+            cleanText = jsonMatch[1];
         }
-        return parsed;
+
+        const parsed = JSON.parse(cleanText);
+        // Basic validation
+        if (typeof parsed !== 'object' || parsed === null || !parsed.url || !parsed.suggested_actions) {
+            throw new Error("Parsed JSON is missing required fields like 'url' or 'suggested_actions'.");
+        }
+        return parsed as AnalysisResultData;
     } catch (e) {
         console.error("Failed to parse JSON response:", responseText);
         const errorMessage = e instanceof Error ? e.message : 'Unknown parsing error.';
@@ -73,7 +89,7 @@ const analyzeWithGemini = async (url: string): Promise<AnalysisResultData> => {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const analyzeWithOpenAICompatible = async (url: string, config: AIConfig): Promise<AnalysisResultData> => {
+const analyzeWithOpenAICompatible = async (url: string, config: AIWorkerConfig): Promise<AnalysisResultData> => {
     const { provider, apiKey, model } = config;
     let apiUrl = '';
     let modelName = '';
@@ -141,24 +157,27 @@ const analyzeWithOpenAICompatible = async (url: string, config: AIConfig): Promi
 
             clearTimeout(timeoutId);
 
-            if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+            if (response.status === 429) {
+                const errorBody = await response.json().catch(() => ({ error: { message: 'Rate limit details unavailable.' } }));
+                const specificMessage = errorBody?.error?.message || 'Check your API plan limits.';
+                throw new Error(`Rate limit hit. ${specificMessage} Lower your concurrency or wait.`);
+            }
+            
+            if (response.status >= 400 && response.status < 500 && response.status !== 408) {
                 const errorBody = await response.text();
-                throw new Error(`API request failed for ${provider} with permanent client error ${response.status}: ${errorBody}`);
+                throw new Error(`API request failed with permanent client error ${response.status}: ${errorBody}`);
             }
 
             if (!response.ok) {
                 const errorBody = await response.text();
-                throw new Error(`API request failed for ${provider} with status ${response.status}: ${errorBody}`);
+                throw new Error(`API request failed for ${provider} with server status ${response.status}: ${errorBody}`);
             }
             
             const data = await response.json();
 
             if (provider === 'claude') {
                 if (data.content && data.content[0] && data.content[0].text) {
-                    const textContent = data.content[0].text;
-                    const jsonMatch = textContent.match(/```json\n([\s\S]*?)\n```/);
-                    const jsonString = jsonMatch ? jsonMatch[1] : textContent;
-                    return parseJsonResponse(jsonString);
+                     return parseJsonResponse(data.content[0].text);
                 } else {
                     throw new Error('Invalid response structure from Claude API');
                 }
@@ -183,7 +202,7 @@ const analyzeWithOpenAICompatible = async (url: string, config: AIConfig): Promi
     throw lastError; // If all retries fail, throw the last error
 };
 
-export const analyzeUrl = async (url: string, config: AIConfig): Promise<AnalysisResultData> => {
+export const analyzeUrl = async (url: string, config: AIWorkerConfig): Promise<AnalysisResultData> => {
     try {
         if (config.provider === 'gemini') {
             return await analyzeWithGemini(url);

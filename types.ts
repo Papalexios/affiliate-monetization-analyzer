@@ -1,20 +1,29 @@
+export interface ActionItem {
+  title: string;
+  description: string;
+  impact: 'High' | 'Medium' | 'Low';
+}
 
 export interface AnalysisResultData {
   url: string;
   monetization_score: number;
-  justification: string;
+  summary: string;
   priority: 'High' | 'Medium' | 'Low';
-  suggested_actions: string[];
-  affiliate_niche: string;
-  content_gap_analysis: string;
-  conversion_booster: string;
+  suggested_actions: ActionItem[];
 }
 
 export interface AnalysisResult {
   status: 'success' | 'error' | 'pending';
-  url: string;
+  url:string;
   data?: AnalysisResultData;
   error?: string;
 }
 
 export type AIProvider = 'gemini' | 'openai' | 'claude' | 'openrouter' | 'groq';
+
+export interface AIWorkerConfig {
+  id: string;
+  provider: AIProvider;
+  apiKey: string;
+  model: string;
+}
